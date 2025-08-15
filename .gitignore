@@ -1,0 +1,11 @@
+config.json
+attendance.json
+debug.html
+
+# Django specific ignores
+__pycache__/
+*.pyc
+*.sqlite3
+/media/
+/static/
+.env 
