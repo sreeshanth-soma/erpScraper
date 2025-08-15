@@ -1,11 +1,11 @@
-config.json
-attendance.json
-debug.html
+# VS Code settings
+.vscode/
 
-# Django specific ignores
+# JSON config/data
+attendance.json
+config.json
+selectors.json
+
+# Python cache
 __pycache__/
 *.pyc
-*.sqlite3
-/media/
-/static/
-.env 
