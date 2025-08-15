@@ -1,0 +1,10 @@
+{
+    "username_input": "input[placeholder='Username or Email Address']",
+    "password_input": "#passwordValue",
+    "login_button": "button.submit-login",
+    "dashboard_loaded_indicator": ".user-info",
+    "modules_dropdown_icon": "span.dropdown svg[data-icon='th']",
+    "attendance_link": "a[href*='Planning/GroupSubjectList.php']",
+    "subject_attendance_info": ".subject-card div[id^='viewSession_']",
+    "total_group_attendance_summary": "#totalGroupAttendance"
+}
