@@ -2,8 +2,11 @@ import os
 import django
 import sys
 
+# Get the directory of the current script
+SCRIPT_DIR = os.path.dirname(__file__)
+
 # Add the parent directory of VmedulifeDashboard to the Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'dashboard_project')))
+sys.path.append(os.path.abspath(os.path.join(SCRIPT_DIR, 'dashboard_project')))
 
 # Configure Django settings
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'VmedulifeDashboard.settings')
@@ -26,26 +29,28 @@ from webdriver_manager.chrome import ChromeDriverManager
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Global Constants
-CONFIG_FILE = 'config.json'
-SELECTORS_FILE = 'selectors.json'
-ATTENDANCE_FILE = 'attendance.json'
-DEBUG_HTML_FILE = 'debug.html'
+CONFIG_FILE = os.path.join(SCRIPT_DIR, 'config.json')
+SELECTORS_FILE = os.path.join(SCRIPT_DIR, 'selectors.json')
+ATTENDANCE_FILE = os.path.join(SCRIPT_DIR, 'attendance.json')
+DEBUG_HTML_FILE = os.path.join(SCRIPT_DIR, 'debug.html')
 LOGIN_URL = "https://portal.vmedulife.com/public/auth/#/login/Cvr-Telangana"
 
-driver = None  # Initialize driver as None globally
-wait = None    # Initialize wait as None globally
-
-# Utility Functions
+# Utility Functions (moved here to be defined before global use)
 def read_json_file(filepath):
     try:
         with open(filepath, 'r') as f:
             return json.load(f)
     except FileNotFoundError:
         logging.error(f"Error: {filepath} not found. Please create it.")
-        exit()
+        return None
     except json.JSONDecodeError:
         logging.error(f"Error: Could not decode JSON from {filepath}. Please check file format.")
-        exit()
+        return None
+
+driver = None  # Initialize driver as None globally
+wait = None    # Initialize wait as None globally
+selectors = read_json_file(SELECTORS_FILE) # Load selectors globally
+config = read_json_file(CONFIG_FILE) # Load config globally
 
 def save_data(data, filepath):
     try:
@@ -54,6 +59,14 @@ def save_data(data, filepath):
         logging.info(f"Data successfully saved to {filepath}")
     except Exception as e:
         logging.error(f"Error saving data to {filepath}: {e}")
+
+def dump_html_for_debug(html_content):
+    try:
+        with open(DEBUG_HTML_FILE, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        logging.info(f"Current page HTML dumped to {DEBUG_HTML_FILE} for debugging.")
+    except Exception as e:
+        logging.error(f"Error dumping HTML for debug: {e}")
 
 # Selenium Functions
 def setup_driver():
@@ -64,43 +77,48 @@ def setup_driver():
         driver = webdriver.Chrome(service=service)
         wait = WebDriverWait(driver, 10)  # Default wait of 10 seconds
         logging.info("WebDriver setup complete.")
+        return driver, wait # Return driver and wait
     except Exception as e:
         logging.error(f"Error setting up WebDriver: {e}")
-        exit()
+        return None, None # Return None on error
 
-def login():
-    logging.info("Opening login page...")
+def login(username, password):
+    global selectors # Declare selectors as global
+    global dump_html_for_debug # Declare dump_html_for_debug as global
+
+    if selectors is None:
+        raise Exception("Selectors could not be loaded. Check selectors.json.")
+
+    logging.info("Navigating to login page...")
     driver.get(LOGIN_URL)
-
-    config = read_json_file(CONFIG_FILE)
-    selectors = read_json_file(SELECTORS_FILE)
-
+    
     try:
-        logging.info("Entering credentials...")
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selectors["username_input"]))).send_keys(config["username"])
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selectors["password_input"]))).send_keys(config["password"])
+        logging.info("Filling in username and password...")
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selectors['username_input']))).send_keys(username)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selectors['password_input']))).send_keys(password)
         
         logging.info("Clicking login button...")
-        wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selectors["login_button"]))).click()
+        wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selectors['login_button']))).click()
         
         logging.info("Waiting for dashboard to load...")
-        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, selectors["dashboard_loaded_indicator"])))
-        logging.info("Login successful!")
+        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, selectors['dashboard_loaded_indicator'])))
+        logging.info("Successfully logged in and dashboard loaded.")
     except TimeoutException:
-        logging.error("Login failed: Dashboard element not found. Saving HTML dump for debugging...")
-        with open(DEBUG_HTML_FILE, "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
-        driver.quit()
-        exit()
+        logging.error("Timeout during login. Dashboard indicator not found.")
+        dump_html_for_debug(driver.page_source)
+        raise # Re-raise the exception to be caught in main or calling function
     except Exception as e:
         logging.error(f"An error occurred during login: {e}")
-        with open(DEBUG_HTML_FILE, "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
-        driver.quit()
-        exit()
+        dump_html_for_debug(driver.page_source)
+        raise # Re-raise the exception
 
 def navigate_to_attendance_page():
-    selectors = read_json_file(SELECTORS_FILE)
+    global selectors # Declare selectors as global
+    global dump_html_for_debug # Declare dump_html_for_debug as global
+    # selectors = read_json_file(SELECTORS_FILE) # Removed: selectors is now global
+    if selectors is None: # Handle case where selectors file read fails
+        raise Exception("Selectors could not be loaded.")
+
     try:
         logging.info("Clicking on modules dropdown icon...")
         wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selectors["modules_dropdown_icon"]))).click()
@@ -126,17 +144,20 @@ def navigate_to_attendance_page():
         logging.error("Navigation to attendance page failed: Element not found. Saving HTML dump for debugging...")
         with open(DEBUG_HTML_FILE, "w", encoding="utf-8") as f:
             f.write(driver.page_source)
-        driver.quit()
-        exit()
+        raise # Re-raise the exception
     except Exception as e:
         logging.error(f"An error occurred during navigation: {e}")
         with open(DEBUG_HTML_FILE, "w", encoding="utf-8") as f:
             f.write(driver.page_source)
-        driver.quit()
-        exit()
+        raise # Re-raise the exception
 
 def scrape_attendance():
-    # selectors = read_json_file(SELECTORS_FILE) # Removed: selectors is now global
+    global selectors # Declare selectors as global
+    global dump_html_for_debug # Declare dump_html_for_debug as global
+
+    if selectors is None:
+        raise Exception("Selectors could not be loaded. Check selectors.json.")
+
     logging.info("Extracting attendance data...")
     total_classes_conducted = 0
     classes_attended = 0
@@ -202,20 +223,41 @@ def scrape_attendance():
             f.write(driver.page_source)
         return None
 
+def teardown_driver():
+    global driver
+    if driver:
+        logging.info("Quitting WebDriver...")
+        driver.quit()
+        driver = None
+
 # Main execution
 def main():
     global selectors # Declare selectors as global here as well
+    global config # Declare config as global here as well
     
-    config = read_json_file(CONFIG_FILE)
-    selectors = read_json_file(SELECTORS_FILE)
+    # config and selectors are already loaded globally at the top of the file
+    # config = read_json_file(CONFIG_FILE)
+    # if config is None:
+    #     logging.error("Config file could not be loaded. Exiting.")
+    #     return
+    
+    # selectors is already loaded globally at the top of the file
+    # selectors = read_json_file(SELECTORS_FILE)
+
+    if config is None:
+        logging.error("Config file could not be loaded globally. Exiting.")
+        return
+    if selectors is None:
+        logging.error("Selectors file could not be loaded globally. Exiting.")
+        return
 
     setup_driver()
     if driver is None or wait is None:
         logging.error("WebDriver was not set up correctly. Exiting.")
-        exit()
+        return # Exit main function gracefully
 
     try:
-        login()
+        login(config["username"], config["password"])
         navigate_to_attendance_page()
         scrape_attendance() # The scrape_attendance function now saves directly to the DB
 
@@ -225,7 +267,7 @@ def main():
             f.write(driver.page_source)
     finally:
         logging.info("Scraping finished.")
-        driver.quit()
+        teardown_driver()
 
 if __name__ == "__main__":
     main()

@@ -9,3 +9,10 @@ selectors.json
 # Python cache
 __pycache__/
 *.pyc
+
+# Django specific ignores (re-added)
+*.sqlite3
+/media/
+/static/
+.env
+debug.html
