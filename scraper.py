@@ -12,7 +12,9 @@ sys.path.append(os.path.abspath(os.path.join(SCRIPT_DIR, 'dashboard_project')))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'VmedulifeDashboard.settings')
 django.setup()
 
-from attendance_dashboard.models import AttendanceData
+from attendance_dashboard.models import AttendanceData, UserProfile
+from django.contrib.auth.models import User
+from datetime import date
 
 import json
 import logging
@@ -161,12 +163,29 @@ def scrape_attendance():
     logging.info("Extracting attendance data...")
     total_classes_conducted = 0
     classes_attended = 0
-    attendance_percentage = "N/A"
+    attendance_percentage = 0.00  # Initialize as float
 
-    # Wait for the total group attendance summary to be visible and contain text
-    logging.info("Waiting for overall attendance summary to load...")
-    wait.until(EC.text_to_be_present_in_element((By.CSS_SELECTOR, selectors['total_group_attendance_summary']), "%"))
-    logging.info("Overall attendance summary loaded.")
+    # For demonstration, we'll use a default user. In a real application,
+    # the user would be determined from the session or config.
+    # Get or create a dummy user and user profile
+    username = config["username"] # Use the username from config.json
+    user, created = User.objects.get_or_create(username=username)
+    user_profile, created_profile = UserProfile.objects.get_or_create(user=user)
+
+    today = date.today()
+    attendance_record = None
+    try:
+        # Try to get existing attendance record for today and this user
+        attendance_record = AttendanceData.objects.get(user=user_profile, date=today)
+        logging.info(f"Found existing attendance record for {username} on {today}. Updating...")
+    except AttendanceData.DoesNotExist:
+        logging.info(f"No existing attendance record for {username} on {today}. Creating new one...")
+        attendance_record = AttendanceData(user=user_profile)
+
+    # Removed: Wait for the total group attendance summary to be visible and contain text
+    # logging.info("Waiting for overall attendance summary to load...")
+    # wait.until(EC.text_to_be_present_in_element((By.CSS_SELECTOR, selectors['total_group_attendance_summary']), "%"))
+    # logging.info("Overall attendance summary loaded.")
 
     try:
         # Extract data from individual subject attendance elements
@@ -174,7 +193,22 @@ def scrape_attendance():
             EC.visibility_of_all_elements_located((By.CSS_SELECTOR, selectors['subject_attendance_info']))
         )
 
+        if not subject_attendance_elements:
+            logging.warning("No subject attendance elements found. Returning None.")
+            return None
+
         for element in subject_attendance_elements:
+            # Get the parent element to find the subject name
+            parent_element = element.find_element(By.XPATH, ".//ancestor::div[contains(@class, 'subject-card')]")
+            subject_name_element = parent_element.find_element(By.TAG_NAME, "h4")
+            subject_name = subject_name_element.text.lower()
+
+            multiplier = 1
+            if "ct lab" in subject_name:
+                multiplier = 2
+            elif "lab" in subject_name:
+                multiplier = 3
+
             # Wait for the preloader image to disappear from within this specific subject element
             preloader_selector = f"#{element.get_attribute('id')} img[src*='Ring-Preloader']"
             logging.debug(f"Waiting for preloader to disappear in {element.get_attribute('id')} using selector: {preloader_selector}")
@@ -197,9 +231,9 @@ def scrape_attendance():
                     total_str = match.group(2)
                     percentage_str = match.group(3)
                     
-                    classes_attended += int(attended_str)
-                    total_classes_conducted += int(total_str)
-                    logging.debug(f"Parsed: Attended={attended_str}, Total={total_str}, Percentage={percentage_str} from {text}")
+                    classes_attended += int(attended_str) * multiplier
+                    total_classes_conducted += int(total_str) * multiplier
+                    logging.debug(f"Parsed: Attended={attended_str}, Total={total_str}, Percentage={percentage_str}, Multiplier={multiplier} from {text}")
                 except ValueError as ve:
                     logging.warning(f"Could not parse attendance numbers from: {text}. Error: {ve}")
             else:
@@ -207,13 +241,15 @@ def scrape_attendance():
 
         if total_classes_conducted > 0:
             attendance_percentage = round((classes_attended / total_classes_conducted * 100), 2)
+        else:
+            attendance_percentage = 0.00 # Set to 0 if no classes conducted
         
-        # Create and save an AttendanceData object instead of returning a dictionary
-        attendance_record = AttendanceData.objects.create(
-            total_classes_conducted=total_classes_conducted,
-            classes_attended=classes_attended,
-            attendance_percentage=attendance_percentage
-        )
+        # Update the attendance record attributes
+        attendance_record.total_classes_conducted = total_classes_conducted
+        attendance_record.classes_attended = classes_attended
+        attendance_record.attendance_percentage = attendance_percentage
+        attendance_record.save() # Save the updated or new record
+
         logging.info(f"Attendance data saved to Django database: {attendance_record}")
         return attendance_record # Return the Django model instance
 
